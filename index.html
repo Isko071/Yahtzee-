@@ -3,11 +3,164 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Ятзи</title>
+<style>
+:root {
+  --bg: oklch(0.97 0.006 90);
+  --surface: oklch(0.995 0.004 90);
+  --ink: oklch(0.24 0.02 260);
+  --muted: oklch(0.48 0.02 260);
+  --line: oklch(0.89 0.01 90);
+  --accent: oklch(0.52 0.12 175);
+  --accent-ink: oklch(0.99 0.01 175);
+  --accent-soft: oklch(0.93 0.05 175);
+  --die: oklch(1 0 0);
+  --pip: oklch(0.25 0.02 260);
+  --held: oklch(0.93 0.05 175);
+  --shadow: 0 2px 0 oklch(0.85 0.01 90), 0 8px 20px -8px oklch(0.3 0.03 260 / .25);
+  --focus: oklch(0.55 0.18 260);
+  --die-edge: oklch(0.62 0.02 260);
+  --die-shadow: 0 3px 0 oklch(0.7 0.015 260), 0 10px 18px -6px oklch(0.25 0.03 260 / .45);
+  --overlay: oklch(0.15 0.02 260 / .6);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: oklch(0.2 0.015 260);
+    --surface: oklch(0.25 0.018 260);
+    --ink: oklch(0.95 0.008 90);
+    --muted: oklch(0.75 0.015 260);
+    --line: oklch(0.35 0.02 260);
+    --accent: oklch(0.74 0.11 175);
+    --accent-ink: oklch(0.2 0.03 175);
+    --accent-soft: oklch(0.33 0.05 175);
+    --die: oklch(0.93 0.01 90);
+    --pip: oklch(0.22 0.02 260);
+    --held: oklch(0.4 0.07 175);
+    --shadow: 0 2px 0 oklch(0.16 0.01 260), 0 8px 20px -8px oklch(0 0 0 / .6);
+    --focus: oklch(0.78 0.14 260);
+    --die-edge: transparent;
+    --die-shadow: var(--shadow);
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+button { font-family: inherit; }
+button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+.app { max-width: 900px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+
+/* Шапка */
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.turn { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.turn small { font-size: 13px; color: var(--muted); }
+.turn strong { font-size: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.layout { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; min-width: 0; }
+
+/* Панель кубиков */
+.play { flex: 1 1 100%; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.status-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 24px; }
+.status { font-size: 15px; color: var(--muted); }
+.roll-dots { display: flex; gap: 6px; }
+.roll-dots i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--accent); }
+.roll-dots i.on { background: var(--accent); }
+
+.dice { display: flex; gap: 12px; justify-content: center; }
+.die-btn {
+  flex: 1 1 0; max-width: 72px; min-width: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  background: none; border: none; padding: 0; cursor: pointer; color: inherit;
+}
+.die-btn:disabled { cursor: default; }
+.die {
+  width: 100%; aspect-ratio: 1; border-radius: 16px;
+  background: var(--die); border: 3px solid var(--die-edge); box-shadow: var(--die-shadow);
+  display: grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr); padding: 12%;
+  transition: transform .15s ease, background .15s ease;
+}
+.die.fresh { opacity: .45; }
+.die.held { background: var(--held); border-color: var(--accent); transform: translateY(-8px); }
+.die span { display: flex; align-items: center; justify-content: center; }
+.die i { width: 68%; aspect-ratio: 1; border-radius: 50%; background: transparent; }
+.die i.on { background: var(--pip); }
+.die i.ph { background: var(--muted); }
+.die-tag { font-size: 12px; font-weight: 700; color: var(--accent); height: 14px; letter-spacing: .04em; }
+
+.roll-btn {
+  min-height: 56px; border-radius: 14px; border: none;
+  background: var(--accent); color: var(--accent-ink);
+  font-size: 18px; font-weight: 700; cursor: pointer;
+}
+.roll-btn:disabled { background: var(--line); color: var(--muted); cursor: not-allowed; }
+
+/* Таблица очков */
+.sheet { flex: 1 1 320px; overflow: hidden; }
+.grid { display: grid; grid-template-columns: 1fr 84px 84px; gap: 4px; align-items: center; }
+.sheet-head { padding: 10px 10px 8px; border-bottom: 1px solid var(--line); }
+.head-name {
+  text-align: center; font-size: 14px; font-weight: 700; padding: 6px 2px; border-radius: 10px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.head-name.current { background: var(--accent); color: var(--accent-ink); }
+.row { padding: 3px 10px; }
+.row .label { font-size: 15px; font-weight: 500; padding-left: 4px; }
+.row .label small { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 2px; }
+.row.section { padding: 10px 10px 2px; }
+.row.section .label { font-size: 12px; font-weight: 700; color: var(--muted); }
+.row.info { padding: 6px 10px; }
+.row.info .label { font-size: 14px; font-weight: 600; color: var(--muted); }
+.row.top-line { border-top: 1px solid var(--line); }
+.row.total { padding: 8px 10px; background: var(--accent-soft); border-top: 1px solid var(--line); }
+.row.total .label { font-size: 16px; font-weight: 700; }
+
+.cell {
+  min-height: 40px; border-radius: 10px; border: 2px solid transparent;
+  background: transparent; color: var(--ink); font-size: 16px; padding: 0;
+  display: flex; align-items: center; justify-content: center; font-family: inherit;
+}
+.row.info .cell, .row.total .cell { min-height: 32px; }
+.row.total .cell { font-weight: 700; }
+.cell.filled { font-weight: 700; }
+.cell.zero { color: var(--muted); font-weight: 400; text-decoration: line-through; }
+.cell.hint { cursor: pointer; background: var(--bg); border: 2px dashed var(--line); color: var(--muted); }
+.cell.hint.best { background: var(--accent-soft); border: 2px solid var(--accent); color: var(--ink); font-weight: 700; }
+.cell.blocked, .cell.muted { color: var(--muted); font-weight: 400; }
+.cell.accent { color: var(--accent); font-weight: 700; }
+
+/* Окно конца игры */
+.overlay {
+  position: fixed; inset: 0; background: var(--overlay); z-index: 10;
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.dialog {
+  background: var(--surface); width: 100%; max-width: 400px; border-radius: 24px; padding: 24px;
+  display: flex; flex-direction: column; gap: 18px;
+}
+.dialog small { font-size: 14px; color: var(--muted); }
+.dialog h2 { margin: 4px 0 0; font-size: 28px; }
+.results { display: flex; flex-direction: column; gap: 8px; }
+.result {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 16px; border-radius: 14px; border: 2px solid var(--line);
+}
+.result.win { background: var(--accent-soft); border-color: var(--accent); font-weight: 700; }
+.result b { font-size: 24px; }
+.btn-primary {
+  min-height: 52px; border-radius: 14px; border: none;
+  background: var(--accent); color: var(--accent-ink); font-size: 16px; font-weight: 700; cursor: pointer;
+}
+</style>
 </head>
 <body>
-<h1>Ятзи</h1>
-<p>Этап 1: игровая логика (интерфейс появится на этапе 2). Объект <code>Yahtzee</code> доступен в консоли.</p>
+<main class="app" id="app"></main>
 
 <script>
 // <logic>
@@ -201,6 +354,188 @@ var Yahtzee = {
   roll: roll, toggleHold: toggleHold, scoreCategory: scoreCategory
 };
 // </logic>
+
+// <ui>
+// ===== Интерфейс =====
+var LABELS = {
+  ones: 'Единицы', twos: 'Двойки', threes: 'Тройки', fours: 'Четвёрки', fives: 'Пятёрки', sixes: 'Шестёрки',
+  threeKind: 'Сет', fourKind: 'Каре', fullHouse: 'Фулл-хаус', smallStraight: 'Малый стрит',
+  largeStraight: 'Большой стрит', yahtzee: 'Ятзи', chance: 'Шанс'
+};
+var SUBS = { threeKind: '3+', fourKind: '4+', fullHouse: '25', smallStraight: '30', largeStraight: '40', yahtzee: '50' };
+var PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
+
+var game = createGame(['Игрок 1', 'Игрок 2']);
+var appEl = document.getElementById('app');
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function statusText() {
+  if (game.gameOver) return '';
+  if (game.rollsUsed === 0) return 'Бросьте кубики';
+  if (game.rollsUsed >= MAX_ROLLS) return 'Выберите клетку для записи';
+  return 'Зафиксируйте кубики или бросьте ещё';
+}
+
+function rollLabel() {
+  if (game.rollsUsed === 0) return 'Бросить';
+  if (game.rollsUsed < MAX_ROLLS) return 'Бросить ещё (' + rollsLeft(game) + ')';
+  return 'Бросков не осталось';
+}
+
+function diceHtml() {
+  var fresh = game.rollsUsed === 0;
+  var canToggle = !game.gameOver && game.rollsUsed > 0 && game.rollsUsed < MAX_ROLLS;
+  return game.dice.map(function (v, i) {
+    var held = game.held[i];
+    var label = fresh ? 'Кубик ' + (i + 1) + ', не брошен' : 'Кубик ' + (i + 1) + ': ' + v + (held ? ', зафиксирован' : '');
+    var pips = '';
+    for (var k = 0; k < 9; k++) {
+      var cls = !fresh && PIPS[v].indexOf(k) >= 0 ? 'on' : (fresh && k === 4 ? 'ph' : '');
+      pips += '<span><i class="' + cls + '"></i></span>';
+    }
+    return '<button class="die-btn" data-key="die-' + i + '" data-die="' + i + '" aria-pressed="' + held +
+      '" aria-label="' + label + '"' + (canToggle ? '' : ' disabled') + '>' +
+      '<span class="die' + (fresh ? ' fresh' : '') + (held ? ' held' : '') + '">' + pips + '</span>' +
+      '<span class="die-tag">' + (held ? 'ДЕРЖУ' : '') + '</span></button>';
+  }).join('');
+}
+
+// Ячейка таблицы: игрок pi, категория cat
+function catCellHtml(pi, cat, hints) {
+  var player = game.players[pi];
+  var value = player.scores[cat];
+  var name = LABELS[cat];
+  if (value !== null) {
+    return '<button class="cell filled' + (value === 0 ? ' zero' : '') + '" disabled aria-label="' + name + ': ' + value + '">' + value + '</button>';
+  }
+  if (pi === game.current && hints) {
+    if (hints.allowed.indexOf(cat) >= 0) {
+      var pts = possibleScore(player, cat, game.dice);
+      var best = cat === hints.best;
+      return '<button class="cell hint' + (best ? ' best' : '') + '" data-key="cat-' + cat + '" data-cat="' + cat +
+        '" aria-label="Записать в «' + name + '»: ' + pts + '">' + pts + '</button>';
+    }
+    return '<button class="cell blocked" disabled aria-label="' + name + ': недоступно (жокер)">—</button>';
+  }
+  return '<button class="cell" disabled aria-label="' + name + ': пусто"></button>';
+}
+
+function getHints() {
+  if (game.gameOver || game.rollsUsed === 0) return null;
+  var player = game.players[game.current];
+  var allowed = allowedCategories(player, game.dice);
+  var best = null, bestPts = 0;
+  allowed.forEach(function (c) {
+    var p = possibleScore(player, c, game.dice);
+    if (p > bestPts) { bestPts = p; best = c; }
+  });
+  return { allowed: allowed, best: best };
+}
+
+function rowHtml(cls, label, sub, cells) {
+  return '<div class="grid row ' + cls + '"><span class="label">' + label +
+    (sub ? '<small>' + sub + '</small>' : '') + '</span>' + cells + '</div>';
+}
+
+function infoCells(fn) {
+  return game.players.map(function (p) { return fn(p); }).join('');
+}
+
+function plainCell(text, cls) {
+  return '<span class="cell ' + (cls || '') + '">' + text + '</span>';
+}
+
+function sheetHeadHtml() {
+  return '<div class="grid sheet-head"><span></span>' + game.players.map(function (p, i) {
+    return '<span class="head-name' + (i === game.current && !game.gameOver ? ' current' : '') + '">' + esc(p.name) + '</span>';
+  }).join('') + '</div>';
+}
+
+function upperSheetHtml(hints) {
+  var html = sheetHeadHtml() + rowHtml('section', 'Верхняя секция', '', '<span></span><span></span>');
+  UPPER.forEach(function (cat) {
+    html += rowHtml('', LABELS[cat], SUBS[cat], game.players.map(function (p, pi) { return catCellHtml(pi, cat, hints); }).join(''));
+  });
+  html += rowHtml('info', 'Сумма', '', infoCells(function (p) { return plainCell(upperSum(p), 'muted'); }));
+  html += rowHtml('info', 'Бонус +35', '', infoCells(function (p) {
+    var u = upperSum(p);
+    return u >= UPPER_BONUS_THRESHOLD ? plainCell('+' + UPPER_BONUS, 'accent') : plainCell(u + '/' + UPPER_BONUS_THRESHOLD, 'muted');
+  }));
+  return html;
+}
+
+function lowerSheetHtml(hints) {
+  var html = sheetHeadHtml() + rowHtml('section', 'Нижняя секция', '', '<span></span><span></span>');
+  LOWER.forEach(function (cat) {
+    html += rowHtml('', LABELS[cat], SUBS[cat], game.players.map(function (p, pi) { return catCellHtml(pi, cat, hints); }).join(''));
+  });
+  html += rowHtml('info top-line', 'Ятзи +100', '', infoCells(function (p) {
+    return p.yahtzeeBonuses ? plainCell('+' + p.yahtzeeBonuses * YAHTZEE_BONUS, 'accent') : plainCell('—', 'muted');
+  }));
+  html += rowHtml('total', 'Итого', '', infoCells(function (p) { return plainCell(totalScore(p)); }));
+  return html;
+}
+
+function gameOverHtml() {
+  var totals = game.players.map(totalScore);
+  var max = Math.max.apply(null, totals);
+  var winners = totals.filter(function (t) { return t === max; }).length;
+  var title = winners > 1 ? 'Ничья' : 'Победил: ' + esc(game.players[totals.indexOf(max)].name);
+  var rows = game.players.map(function (p, i) {
+    return '<div class="result' + (winners === 1 && totals[i] === max ? ' win' : '') + '"><span>' + esc(p.name) + '</span><b>' + totals[i] + '</b></div>';
+  }).join('');
+  return '<div class="overlay" role="dialog" aria-label="Конец игры"><div class="dialog">' +
+    '<div><small>Игра окончена</small><h2>' + title + '</h2></div>' +
+    '<div class="results">' + rows + '</div>' +
+    '<button class="btn-primary" id="again" data-key="again">Играть снова</button></div></div>';
+}
+
+function render() {
+  var active = document.activeElement;
+  var focusKey = active && active.getAttribute ? active.getAttribute('data-key') : null;
+  var hints = getHints();
+  var dots = '';
+  for (var i = 0; i < MAX_ROLLS; i++) dots += '<i class="' + (i < rollsLeft(game) ? 'on' : '') + '"></i>';
+  var canRoll = !game.gameOver && game.rollsUsed < MAX_ROLLS;
+
+  appEl.innerHTML =
+    '<div class="topbar"><div class="turn"><small>Ход</small><strong>' +
+      (game.gameOver ? 'Игра окончена' : esc(game.players[game.current].name)) + '</strong></div></div>' +
+    '<div class="layout">' +
+      '<section class="card play">' +
+        '<div class="status-row"><span class="status" aria-live="polite">' + statusText() + '</span>' +
+          '<span class="roll-dots" role="img" aria-label="Осталось бросков: ' + rollsLeft(game) + '">' + dots + '</span></div>' +
+        '<div class="dice">' + diceHtml() + '</div>' +
+        '<button class="roll-btn" id="roll" data-key="roll"' + (canRoll ? '' : ' disabled') + '>' + rollLabel() + '</button>' +
+      '</section>' +
+      '<section class="card sheet">' + upperSheetHtml(hints) + '</section>' +
+      '<section class="card sheet">' + lowerSheetHtml(hints) + '</section>' +
+    '</div>' +
+    (game.gameOver ? gameOverHtml() : '');
+
+  if (focusKey) {
+    var el = appEl.querySelector('[data-key="' + focusKey + '"]');
+    if (el && !el.disabled) el.focus();
+  }
+}
+
+appEl.addEventListener('click', function (e) {
+  var btn = e.target.closest('button');
+  if (!btn || btn.disabled) return;
+  if (btn.id === 'roll') roll(game);
+  else if (btn.hasAttribute('data-die')) toggleHold(game, Number(btn.getAttribute('data-die')));
+  else if (btn.hasAttribute('data-cat')) scoreCategory(game, btn.getAttribute('data-cat'));
+  else if (btn.id === 'again') game = createGame(['Игрок 1', 'Игрок 2']);
+  render();
+});
+
+render();
+// </ui>
 </script>
 </body>
 </html>

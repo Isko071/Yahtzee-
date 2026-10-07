@@ -221,6 +221,7 @@ button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .mode-btn { text-align: left; cursor: pointer; }
 .mode-btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
 .modes { display: flex; flex-direction: column; gap: 8px; }
+.levels { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .name-input:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .name-fixed { border-style: dashed; color: var(--muted); display: flex; align-items: center; }
 .btn-play {
@@ -503,8 +504,28 @@ function cpuCategoryValue(player, cat, dice) {
   return value;
 }
 
-// Лучшая клетка для записи: максимум ценности среди разрешённых
-function cpuChooseCategory(player, dice) {
+// Лёгкий уровень: оставляет самое частое значение (при равенстве — большее)
+function cpuEasyHold(dice) {
+  var counts = countFaces(dice);
+  var best = 1;
+  for (var v = 1; v <= 6; v++) if (counts[v] >= counts[best]) best = v;
+  return dice.map(function (d) { return d === best; });
+}
+
+// Лёгкий уровень: клетка с максимумом очков (при равенстве — первая в таблице)
+function cpuEasyCategory(player, dice) {
+  var allowed = allowedCategories(player, dice);
+  var best = allowed[0], bestPts = -1;
+  allowed.forEach(function (c) {
+    var pts = possibleScore(player, c, dice);
+    if (pts > bestPts) { bestPts = pts; best = c; }
+  });
+  return best;
+}
+
+// Лучшая клетка для записи: максимум ценности среди разрешённых (level: 'easy' или 'hard')
+function cpuChooseCategory(player, dice, level) {
+  if (level === 'easy') return cpuEasyCategory(player, dice);
   var allowed = allowedCategories(player, dice);
   var best = allowed[0], bestValue = -Infinity;
   allowed.forEach(function (c) {
@@ -570,9 +591,10 @@ function holdOptionsFor(sorted) {
 
 // Выбор кубиков для сохранения: массив из пяти boolean.
 // Если все true — лучше остановиться и записать результат (добрасывать невыгодно).
-function cpuChooseHold(player, dice, rollsLeft) {
+function cpuChooseHold(player, dice, rollsLeft, level) {
   var allHeld = [true, true, true, true, true];
   if (rollsLeft <= 0) return allHeld;
+  if (level === 'easy') return cpuEasyHold(dice);
   var stopMemo = {};
   var evMemo = [];
   for (var r = 0; r <= rollsLeft; r++) evMemo.push({});
@@ -632,7 +654,8 @@ var Yahtzee = {
   upperSum: upperSum, upperBonus: upperBonus, lowerSum: lowerSum, totalScore: totalScore,
   isPlayerDone: isPlayerDone, createGame: createGame, rollsLeft: rollsLeft,
   roll: roll, toggleHold: toggleHold, scoreCategory: scoreCategory,
-  cpuChooseHold: cpuChooseHold, cpuChooseCategory: cpuChooseCategory
+  cpuChooseHold: cpuChooseHold, cpuChooseCategory: cpuChooseCategory,
+  cpuEasyHold: cpuEasyHold, cpuEasyCategory: cpuEasyCategory
 };
 // </logic>
 
@@ -647,7 +670,7 @@ var SUBS = { threeKind: '3+', fourKind: '4+', fullHouse: '25', smallStraight: '3
 var PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
 
 var game = null;
-var app = { screen: 'start', mode: 'cpu', n1: 'Игрок 1', n2: 'Игрок 2', thinking: false, rolling: false, display: null, modal: null };
+var app = { screen: 'start', mode: 'cpu', level: 'hard', n1: 'Игрок 1', n2: 'Игрок 2', thinking: false, rolling: false, display: null, modal: null };
 var gameToken = 0; // увеличивается при выходе из партии, чтобы остановить ход компьютера и анимацию
 var appEl = document.getElementById('app');
 
@@ -765,14 +788,14 @@ async function cpuTurn() {
   await rollAnimated(); if (!alive()) return;
   for (var k = 0; k < 2; k++) {
     await sleep(700); if (!alive()) return;
-    var hold = cpuChooseHold(game.players[game.current], game.dice, rollsLeft(game));
+    var hold = cpuChooseHold(game.players[game.current], game.dice, rollsLeft(game), app.level);
     game.held = hold; render();
     if (hold.every(Boolean)) break; // все кубики оставлены — добрасывать невыгодно
     await sleep(1000); if (!alive()) return;
     await rollAnimated(); if (!alive()) return;
   }
   await sleep(900); if (!alive()) return;
-  var cat = cpuChooseCategory(game.players[game.current], game.dice);
+  var cat = cpuChooseCategory(game.players[game.current], game.dice, app.level);
   app.thinking = false;
   scoreCategory(game, cat);
   render();
@@ -966,6 +989,10 @@ function startHtml() {
       '<button class="mode-btn" data-key="mode-cpu" data-mode="cpu" aria-pressed="' + cpu + '">Против компьютера</button>' +
       '<button class="mode-btn" data-key="mode-hot" data-mode="hot" aria-pressed="' + !cpu + '">Вдвоём на одном устройстве</button>' +
     '</div></div>' +
+    (cpu ? '<div class="field"><div class="field-title">Сложность</div><div class="levels">' +
+      '<button class="mode-btn" data-key="level-easy" data-level="easy" aria-pressed="' + (app.level === 'easy') + '">Лёгкий</button>' +
+      '<button class="mode-btn" data-key="level-hard" data-level="hard" aria-pressed="' + (app.level === 'hard') + '">Сильный</button>' +
+    '</div></div>' : '') +
     '<div class="field"><div class="field-title">Игроки</div>' +
       '<input class="name-input" data-name="n1" value="' + esc(app.n1) + '" maxlength="14" aria-label="Имя первого игрока">' +
       (cpu ? '<div class="name-fixed">Компьютер</div>'
@@ -1058,6 +1085,7 @@ appEl.addEventListener('click', function (e) {
   else if (act === 'close') { closeModal(); return; }
   else if (act === 'restart') startGame();
   else if (btn.hasAttribute('data-mode')) app.mode = btn.getAttribute('data-mode');
+  else if (btn.hasAttribute('data-level')) app.level = btn.getAttribute('data-level');
   else if (btn.id === 'play' || btn.id === 'again') startGame();
   else if (btn.id === 'menu') toMenu();
   else if (btn.id === 'roll') { rollAnimated(); return; }

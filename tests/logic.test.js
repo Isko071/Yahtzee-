@@ -211,22 +211,6 @@ function seeded(seed) {
   };
 }
 
-// Прежний «жадный» компьютер: оставляет самое частое значение, берёт максимум очков
-function greedyHold(dice) {
-  const counts = Y.countFaces(dice);
-  let best = 1;
-  for (let v = 1; v <= 6; v++) if (counts[v] >= counts[best]) best = v;
-  return dice.map((d) => d === best);
-}
-function greedyCategory(player, dice) {
-  let best = null, bestPts = -1;
-  Y.allowedCategories(player, dice).forEach((c) => {
-    const pts = Y.possibleScore(player, c, dice);
-    if (pts > bestPts) { bestPts = pts; best = c; }
-  });
-  return best;
-}
-
 function soloScore(seed, smart) {
   const rng = seeded(seed);
   const g = Y.createGame(['x']);
@@ -234,20 +218,29 @@ function soloScore(seed, smart) {
     const player = g.players[0];
     Y.roll(g, rng);
     for (let k = 0; k < 2; k++) {
-      const hold = smart ? plain(Y.cpuChooseHold(player, plain(g.dice), Y.rollsLeft(g))) : greedyHold(plain(g.dice));
+      const hold = plain(Y.cpuChooseHold(player, plain(g.dice), Y.rollsLeft(g), smart ? 'hard' : 'easy'));
       if (hold.every(Boolean)) break;
       g.held = hold;
       Y.roll(g, rng);
     }
-    const cat = smart ? Y.cpuChooseCategory(player, g.dice) : greedyCategory(player, g.dice);
+    const cat = Y.cpuChooseCategory(player, g.dice, smart ? 'hard' : 'easy');
     assert.equal(Y.scoreCategory(g, cat), true);
   }
   return Y.totalScore(g.players[0]);
 }
 
-test('новый компьютер заметно сильнее прежнего «жадного» на одинаковых бросках', () => {
+test('сильный компьютер заметно сильнее лёгкого на одинаковых бросках', () => {
   const seeds = [1, 2, 3, 4, 5, 6, 7, 8];
   const avg = (smart) => seeds.reduce((a, s) => a + soloScore(s, smart), 0) / seeds.length;
   const smart = avg(true), greedy = avg(false);
-  assert.ok(smart > greedy + 30, 'умный ' + smart.toFixed(1) + ' против жадного ' + greedy.toFixed(1));
+  assert.ok(smart > greedy + 30, 'сильный ' + smart.toFixed(1) + ' против лёгкого ' + greedy.toFixed(1));
+});
+
+test('лёгкий компьютер: оставляет самое частое значение и берёт максимум очков', () => {
+  const p = Y.createPlayer('c');
+  assert.deepEqual(plain(Y.cpuChooseHold(p, [2, 2, 5, 5, 1], 2, 'easy')), [false, false, true, true, false]);
+  assert.deepEqual(plain(Y.cpuChooseHold(p, [3, 3, 3, 1, 6], 2, 'easy')), [true, true, true, false, false]);
+  assert.equal(Y.cpuChooseCategory(p, [1, 2, 3, 4, 5], 'easy'), 'largeStraight');
+  // жокер: максимум очков среди разрешённых клеток — большой стрит (40)
+  assert.equal(Y.cpuChooseCategory(playerWith({ yahtzee: 50, sixes: 18 }), [6, 6, 6, 6, 6], 'easy'), 'largeStraight');
 });

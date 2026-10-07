@@ -191,6 +191,33 @@ button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
   min-height: 52px; border-radius: 14px; border: 2px solid var(--line); background: var(--surface);
   color: var(--ink); font-size: 16px; cursor: pointer;
 }
+/* Анимация броска и окна */
+@keyframes shake {
+  0%, 100% { transform: translate(0, 0) rotate(0); }
+  25% { transform: translate(-1.5px, 1px) rotate(-3deg); }
+  50% { transform: translate(1.5px, -1px) rotate(2.5deg); }
+  75% { transform: translate(-1px, -1px) rotate(-2deg); }
+}
+.die.rolling { animation: shake .34s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .die.rolling { animation: none; }
+  .die { transition: none; }
+}
+.topbar-actions { display: flex; gap: 8px; }
+.btn-secondary.small { min-height: 44px; padding: 0 14px; border-radius: 12px; font-size: 15px; }
+.btn-secondary.wide { padding: 0 22px; min-height: 56px; font-size: 17px; }
+.start-actions { display: flex; gap: 10px; }
+.start-actions .btn-play { flex: 1; }
+.muted-text { color: var(--muted); line-height: 1.5; }
+.dialog h2 { margin: 0; }
+.sheet-overlay { align-items: flex-end; padding: 0; }
+.dialog.rules {
+  max-width: 560px; max-height: 88vh; overflow: auto; border-radius: 24px 24px 0 0; padding: 22px; gap: 18px;
+}
+.rules-head { display: flex; justify-content: space-between; align-items: center; }
+.rules-head h2 { font-size: 26px; }
+.rule { display: flex; flex-direction: column; gap: 6px; }
+.rule span { color: var(--muted); line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -356,7 +383,7 @@ function toggleHold(state, index) {
 
 // Запись результата в категорию; передаёт ход следующему игроку
 function scoreCategory(state, cat) {
-  if (state.gameOver) return false;
+  if (state.gameOver || state.rollsUsed < 1) return false;
   var player = state.players[state.current];
   if (allowedCategories(player, state.dice).indexOf(cat) < 0) return false;
   var points = possibleScore(player, cat, state.dice);
@@ -421,8 +448,8 @@ var SUBS = { threeKind: '3+', fourKind: '4+', fullHouse: '25', smallStraight: '3
 var PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
 
 var game = null;
-var app = { screen: 'start', mode: 'cpu', n1: 'Игрок 1', n2: 'Игрок 2', thinking: false };
-var cpuToken = 0; // увеличивается при выходе из партии, чтобы остановить ход компьютера
+var app = { screen: 'start', mode: 'cpu', n1: 'Игрок 1', n2: 'Игрок 2', thinking: false, rolling: false, display: null, modal: null };
+var gameToken = 0; // увеличивается при выходе из партии, чтобы остановить ход компьютера и анимацию
 var appEl = document.getElementById('app');
 
 function isHumanTurn() {
@@ -436,31 +463,61 @@ function sleep(ms) {
 function startGame() {
   var first = app.n1.trim() || 'Игрок 1';
   var second = app.mode === 'cpu' ? 'Компьютер' : (app.n2.trim() || 'Игрок 2');
-  cpuToken++;
+  gameToken++;
   app.thinking = false;
+  app.rolling = false;
+  app.display = null;
+  app.modal = null;
   game = createGame([first, second]);
   app.screen = 'game';
 }
 
 function toMenu() {
-  cpuToken++;
+  gameToken++;
   app.thinking = false;
+  app.rolling = false;
+  app.display = null;
+  app.modal = null;
   app.screen = 'start';
+}
+
+function prefersReducedMotion() {
+  try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; }
+}
+
+// Бросок с анимацией: итог уже в состоянии, на экране кубики недолго «крутятся»
+async function rollAnimated() {
+  var token = gameToken;
+  if (app.rolling || !roll(game)) return;
+  if (!prefersReducedMotion()) {
+    var finalDice = game.dice.slice();
+    var held = game.held.slice();
+    app.rolling = true;
+    for (var t = 0; t < 5; t++) {
+      app.display = finalDice.map(function (v, i) { return held[i] ? v : 1 + Math.floor(Math.random() * 6); });
+      render();
+      await sleep(110);
+      if (token !== gameToken) return;
+    }
+  }
+  app.rolling = false;
+  app.display = null;
+  render();
 }
 
 // Ход компьютера: бросок, два раза «оставить частые и бросить ещё», запись в лучшую категорию
 async function cpuTurn() {
-  var token = cpuToken;
-  var alive = function () { return token === cpuToken; };
+  var token = gameToken;
+  var alive = function () { return token === gameToken; };
   app.thinking = true;
   render();
   await sleep(800); if (!alive()) return;
-  roll(game); render();
+  await rollAnimated(); if (!alive()) return;
   for (var k = 0; k < 2; k++) {
     await sleep(700); if (!alive()) return;
     game.held = cpuChooseHold(game.dice); render();
     await sleep(1000); if (!alive()) return;
-    roll(game); render();
+    await rollAnimated(); if (!alive()) return;
   }
   await sleep(900); if (!alive()) return;
   var cat = cpuChooseCategory(game.players[game.current], game.dice);
@@ -483,6 +540,7 @@ function esc(s) {
 function statusText() {
   if (game.gameOver) return '';
   if (app.thinking) return 'Компьютер думает…';
+  if (app.rolling) return 'Бросок…';
   if (game.rollsUsed === 0) return 'Бросьте кубики';
   if (game.rollsUsed >= MAX_ROLLS) return 'Выберите клетку для записи';
   return 'Зафиксируйте кубики или бросьте ещё';
@@ -490,16 +548,19 @@ function statusText() {
 
 function rollLabel() {
   if (app.thinking) return 'Ход компьютера';
+  if (app.rolling) return 'Бросок…';
   if (game.rollsUsed === 0) return 'Бросить';
   if (game.rollsUsed < MAX_ROLLS) return 'Бросить ещё (' + rollsLeft(game) + ')';
   return 'Бросков не осталось';
 }
 
 function diceHtml() {
-  var fresh = game.rollsUsed === 0;
-  var canToggle = isHumanTurn() && !game.gameOver && game.rollsUsed > 0 && game.rollsUsed < MAX_ROLLS;
-  return game.dice.map(function (v, i) {
+  var fresh = game.rollsUsed === 0 && !app.rolling;
+  var canToggle = isHumanTurn() && !app.rolling && !game.gameOver && game.rollsUsed > 0 && game.rollsUsed < MAX_ROLLS;
+  var shown = app.display || game.dice;
+  return shown.map(function (v, i) {
     var held = game.held[i];
+    var spinning = app.rolling && !held;
     var label = fresh ? 'Кубик ' + (i + 1) + ', не брошен' : 'Кубик ' + (i + 1) + ': ' + v + (held ? ', зафиксирован' : '');
     var pips = '';
     for (var k = 0; k < 9; k++) {
@@ -508,7 +569,7 @@ function diceHtml() {
     }
     return '<button class="die-btn" data-key="die-' + i + '" data-die="' + i + '" aria-pressed="' + held +
       '" aria-label="' + label + '"' + (canToggle ? '' : ' disabled') + '>' +
-      '<span class="die' + (fresh ? ' fresh' : '') + (held ? ' held' : '') + '">' + pips + '</span>' +
+      '<span class="die' + (fresh ? ' fresh' : '') + (held ? ' held' : '') + (spinning ? ' rolling' : '') + '">' + pips + '</span>' +
       '<span class="die-tag">' + (held ? 'ДЕРЖУ' : '') + '</span></button>';
   }).join('');
 }
@@ -534,7 +595,7 @@ function catCellHtml(pi, cat, hints) {
 }
 
 function getHints() {
-  if (game.gameOver || game.rollsUsed === 0 || !isHumanTurn()) return null;
+  if (game.gameOver || game.rollsUsed === 0 || app.rolling || !isHumanTurn()) return null;
   var player = game.players[game.current];
   var allowed = allowedCategories(player, game.dice);
   var best = null, bestPts = 0;
@@ -604,6 +665,33 @@ function gameOverHtml() {
     '<button class="btn-primary" id="again" data-key="again">Играть снова</button></div></div></div>';
 }
 
+function rulesHtml() {
+  function block(title, text) {
+    return '<div class="rule"><b>' + title + '</b><span>' + text + '</span></div>';
+  }
+  return '<div class="overlay sheet-overlay" role="dialog" aria-modal="true" aria-label="Правила"><div class="dialog rules">' +
+    '<div class="rules-head"><h2>Правила</h2><button class="btn-secondary small" data-act="close" data-autofocus data-key="close">Закрыть</button></div>' +
+    block('Ход', 'До трёх бросков за ход. Нажмите на кубик, чтобы зафиксировать его — он не перебрасывается. В конце хода запишите результат ровно в одну свободную клетку. Игра идёт, пока не заполнены все 13 клеток.') +
+    block('Верхняя секция', 'Единицы–шестёрки: сумма кубиков с нужной гранью. Если сумма секции 63 и больше — бонус +35.') +
+    block('Нижняя секция', 'Сет (3 одинаковых) и каре (4) — сумма всех кубиков. Фулл-хаус 3+2 — 25. Малый стрит (4 подряд) — 30. Большой стрит (5 подряд) — 40. Ятзи (5 одинаковых) — 50. Шанс — сумма всех кубиков. Не получилось — запишите 0.') +
+    block('Повторный ятзи и жокер', 'Если «Ятзи» уже стоит 50, каждый новый ятзи даёт +100. Когда клетка «Ятзи» занята, действует жокер: сначала верхняя клетка этой грани; если занята — любая свободная нижняя (фулл-хаус и стриты дают полные очки); если и их нет — любая верхняя.') +
+    block('Итог', 'Обе секции плюс бонусы. Побеждает больший счёт.') +
+    '</div></div>';
+}
+
+function confirmHtml() {
+  return '<div class="overlay" role="alertdialog" aria-modal="true" aria-label="Новая игра"><div class="dialog">' +
+    '<h2>Начать заново?</h2><span class="muted-text">Текущая партия будет потеряна.</span>' +
+    '<div class="dialog-actions"><button class="btn-secondary" data-act="close" data-autofocus data-key="cancel">Отмена</button>' +
+    '<button class="btn-primary" data-act="restart" data-key="restart">Начать заново</button></div></div></div>';
+}
+
+function modalHtml() {
+  if (app.modal === 'rules') return rulesHtml();
+  if (app.modal === 'confirm') return confirmHtml();
+  return '';
+}
+
 function startHtml() {
   var logo = [5, 3, 6].map(function (v, i) {
     var pips = '';
@@ -622,29 +710,20 @@ function startHtml() {
       (cpu ? '<div class="name-fixed">Компьютер</div>'
            : '<input class="name-input" data-name="n2" value="' + esc(app.n2) + '" maxlength="14" aria-label="Имя второго игрока">') +
     '</div>' +
-    '<button class="btn-play" id="play" data-key="play">Играть</button></div>';
+    '<div class="start-actions"><button class="btn-play" id="play" data-key="play">Играть</button>' +
+      '<button class="btn-secondary wide" data-act="rules" data-key="rules">Правила</button></div></div>';
 }
 
-function render() {
-  if (app.screen === 'start') {
-    var activeKey = document.activeElement && document.activeElement.getAttribute ? document.activeElement.getAttribute('data-key') : null;
-    appEl.innerHTML = startHtml();
-    if (activeKey) {
-      var target = appEl.querySelector('[data-key="' + activeKey + '"]');
-      if (target) target.focus();
-    }
-    return;
-  }
-  var active = document.activeElement;
-  var focusKey = active && active.getAttribute ? active.getAttribute('data-key') : null;
+function gameHtml() {
   var hints = getHints();
   var dots = '';
   for (var i = 0; i < MAX_ROLLS; i++) dots += '<i class="' + (i < rollsLeft(game) ? 'on' : '') + '"></i>';
-  var canRoll = isHumanTurn() && !app.thinking && !game.gameOver && game.rollsUsed < MAX_ROLLS;
+  var canRoll = isHumanTurn() && !app.thinking && !app.rolling && !game.gameOver && game.rollsUsed < MAX_ROLLS;
 
-  appEl.innerHTML =
-    '<div class="topbar"><div class="turn"><small>Ход</small><strong>' +
-      (game.gameOver ? 'Игра окончена' : esc(game.players[game.current].name)) + '</strong></div></div>' +
+  return '<div class="topbar"><div class="turn"><small>Ход</small><strong>' +
+      (game.gameOver ? 'Игра окончена' : esc(game.players[game.current].name)) + '</strong></div>' +
+      '<div class="topbar-actions"><button class="btn-secondary small" data-act="rules" data-key="rules">Правила</button>' +
+      '<button class="btn-secondary small" data-act="confirm" data-key="new">Новая игра</button></div></div>' +
     '<div class="layout">' +
       '<section class="card play">' +
         '<div class="status-row"><span class="status" aria-live="polite">' + statusText() + '</span>' +
@@ -656,11 +735,15 @@ function render() {
       '<section class="card sheet">' + lowerSheetHtml(hints) + '</section>' +
     '</div>' +
     (game.gameOver ? gameOverHtml() : '');
+}
 
-  if (focusKey) {
-    var el = appEl.querySelector('[data-key="' + focusKey + '"]');
-    if (el && !el.disabled) el.focus();
-  }
+function render() {
+  var active = document.activeElement;
+  var focusKey = active && active.getAttribute ? active.getAttribute('data-key') : null;
+  appEl.innerHTML = (app.screen === 'start' ? startHtml() : gameHtml()) + modalHtml();
+  var target = focusKey ? appEl.querySelector('[data-key="' + focusKey + '"]') : null;
+  if (!target || target.disabled) target = app.modal ? appEl.querySelector('[data-autofocus]') : null;
+  if (target) target.focus();
 }
 
 appEl.addEventListener('input', function (e) {
@@ -671,14 +754,22 @@ appEl.addEventListener('input', function (e) {
 appEl.addEventListener('click', function (e) {
   var btn = e.target.closest('button');
   if (!btn || btn.disabled) return;
-  if (btn.hasAttribute('data-mode')) app.mode = btn.getAttribute('data-mode');
-  else if (btn.id === 'play' || btn.id === 'again') { startGame(); }
+  var act = btn.getAttribute('data-act');
+  if (act === 'rules' || act === 'confirm') app.modal = act;
+  else if (act === 'close') app.modal = null;
+  else if (act === 'restart') startGame();
+  else if (btn.hasAttribute('data-mode')) app.mode = btn.getAttribute('data-mode');
+  else if (btn.id === 'play' || btn.id === 'again') startGame();
   else if (btn.id === 'menu') toMenu();
-  else if (btn.id === 'roll') roll(game);
+  else if (btn.id === 'roll') { rollAnimated(); return; }
   else if (btn.hasAttribute('data-die')) toggleHold(game, Number(btn.getAttribute('data-die')));
   else if (btn.hasAttribute('data-cat')) scoreCategory(game, btn.getAttribute('data-cat'));
   render();
   if (app.screen === 'game') continueIfCpu();
+});
+
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && app.modal) { app.modal = null; render(); }
 });
 
 render();

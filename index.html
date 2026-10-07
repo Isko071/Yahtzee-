@@ -103,7 +103,12 @@ button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 
 /* Таблица очков */
 .sheet { flex: 1 1 320px; overflow: hidden; }
-.grid { display: grid; grid-template-columns: 1fr 84px 84px; gap: 4px; align-items: center; }
+.grid { display: grid; grid-template-columns: 1fr 84px 84px; gap: 4px; align-items: center; position: relative; }
+/* Разделитель между колонками игроков */
+.sheet .grid::after {
+  content: ''; position: absolute; top: 0; bottom: 0; right: calc(10px + 84px + 2px);
+  width: 1px; background: var(--line); pointer-events: none;
+}
 .sheet-head { padding: 10px 10px 8px; border-bottom: 1px solid var(--line); }
 .head-name {
   text-align: center; font-size: 13px; font-weight: 700; padding: 6px 2px; border-radius: 10px;

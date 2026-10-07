@@ -51,7 +51,19 @@ body {
   color: var(--ink);
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
+html { scroll-behavior: smooth; }
 button { font-family: inherit; }
+button {
+  transition: background-color .2s ease, border-color .2s ease, color .2s ease,
+    transform .15s ease, box-shadow .2s ease, opacity .2s ease;
+}
+button:not(:disabled):active { transform: scale(.97); }
+.screen { display: flex; flex-direction: column; gap: 16px; animation: fade-up .35s ease both; }
+@keyframes fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes pop-in { from { transform: scale(.82); opacity: .4; } to { transform: scale(1); opacity: 1; } }
+@keyframes sheet-up { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
 button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 
 .app { max-width: 900px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
@@ -70,7 +82,7 @@ button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .status-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 24px; }
 .status { font-size: 15px; color: var(--muted); }
 .roll-dots { display: flex; gap: 6px; }
-.roll-dots i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--accent); }
+.roll-dots i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--accent); transition: background-color .3s ease; }
 .roll-dots i.on { background: var(--accent); }
 
 .dice { display: flex; gap: 12px; justify-content: center; }
@@ -84,12 +96,13 @@ button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
   width: 100%; aspect-ratio: 1; border-radius: 16px;
   background: var(--die); border: 3px solid var(--die-edge); box-shadow: var(--die-shadow);
   display: grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr); padding: 12%;
-  transition: transform .15s ease, background .15s ease;
+  transition: transform .3s cubic-bezier(.2, .8, .3, 1), background-color .25s ease, border-color .25s ease, opacity .3s ease;
 }
 .die.fresh { opacity: .45; }
 .die.held { background: var(--held); border-color: var(--accent); transform: translateY(-8px); }
 .die span { display: flex; align-items: center; justify-content: center; }
 .die i { width: 68%; aspect-ratio: 1; border-radius: 50%; background: transparent; }
+.die:not(.rolling) i { transition: background-color .25s ease; }
 .die i.on { background: var(--pip); }
 .die i.ph { background: var(--muted); }
 .die-tag { font-size: 12px; font-weight: 700; color: var(--accent); height: 14px; letter-spacing: .04em; }
@@ -133,7 +146,9 @@ button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 }
 .row.info .cell, .row.total .cell { min-height: 32px; }
 .row.total .cell { font-weight: 700; }
-.cell.filled { font-weight: 700; }
+.cell { transition: background-color .2s ease, border-color .2s ease, color .2s ease, transform .15s ease; }
+.cell.filled { font-weight: 700; animation: pop-in .35s cubic-bezier(.2, .8, .3, 1); }
+@media (hover: hover) { .cell.hint:hover { background: var(--accent-soft); border-color: var(--accent); } }
 .cell.zero { color: var(--muted); font-weight: 400; text-decoration: line-through; }
 .cell.hint { cursor: pointer; background: var(--bg); border: 2px dashed var(--line); color: var(--muted); }
 .cell.hint.best { background: var(--accent-soft); border: 2px solid var(--accent); color: var(--ink); font-weight: 700; }
@@ -144,8 +159,11 @@ button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .overlay {
   position: fixed; inset: 0; background: var(--overlay); z-index: 10;
   display: flex; align-items: center; justify-content: center; padding: 16px;
+  animation: fade-in .22s ease both;
 }
+.overlay.closing { animation: fade-out .18s ease forwards; }
 .dialog {
+  animation: pop-in .28s cubic-bezier(.2, .8, .3, 1) both;
   background: var(--surface); width: 100%; max-width: 400px; border-radius: 24px; padding: 24px;
   display: flex; flex-direction: column; gap: 18px;
 }
@@ -199,14 +217,13 @@ button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 /* Анимация броска и окна */
 @keyframes shake {
   0%, 100% { transform: translate(0, 0) rotate(0); }
-  25% { transform: translate(-1.5px, 1px) rotate(-3deg); }
-  50% { transform: translate(1.5px, -1px) rotate(2.5deg); }
-  75% { transform: translate(-1px, -1px) rotate(-2deg); }
+  25% { transform: translate(-1px, -3px) rotate(-5deg); }
+  50% { transform: translate(1px, 0) rotate(3deg); }
+  75% { transform: translate(-1px, -2px) rotate(-3deg); }
 }
-.die.rolling { animation: shake .34s ease-in-out infinite; }
+.die.rolling { animation: shake .4s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .die.rolling { animation: none; }
-  .die { transition: none; }
+  *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
 .topbar-actions { display: flex; gap: 8px; }
 .btn-secondary.small { min-height: 44px; padding: 0 14px; border-radius: 12px; font-size: 15px; }
@@ -216,6 +233,7 @@ button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .muted-text { color: var(--muted); line-height: 1.5; }
 .dialog h2 { margin: 0; }
 .sheet-overlay { align-items: flex-end; padding: 0; }
+.sheet-overlay .dialog { animation: sheet-up .32s cubic-bezier(.2, .8, .3, 1) both; }
 .dialog.rules {
   max-width: 560px; max-height: 88vh; overflow: auto; border-radius: 24px 24px 0 0; padding: 22px; gap: 18px;
 }
@@ -498,10 +516,12 @@ async function rollAnimated() {
     var finalDice = game.dice.slice();
     var held = game.held.slice();
     app.rolling = true;
-    for (var t = 0; t < 5; t++) {
+    // Кубики «замедляются»: интервалы между сменами граней растут
+    var pauses = [60, 70, 80, 95, 115, 140, 170];
+    for (var t = 0; t < pauses.length; t++) {
       app.display = finalDice.map(function (v, i) { return held[i] ? v : 1 + Math.floor(Math.random() * 6); });
       render();
-      await sleep(110);
+      await sleep(pauses[t]);
       if (token !== gameToken) return;
     }
   }
@@ -742,13 +762,48 @@ function gameHtml() {
     (game.gameOver ? gameOverHtml() : '');
 }
 
+// Обновляет существующие узлы по новой разметке: элементы сохраняются, поэтому работают CSS-переходы и фокус
+function morph(from, to) {
+  if (from.nodeType === 1 && to.nodeType === 1) {
+    Array.prototype.slice.call(from.attributes).forEach(function (attr) {
+      if (!to.hasAttribute(attr.name)) from.removeAttribute(attr.name);
+    });
+    Array.prototype.slice.call(to.attributes).forEach(function (attr) {
+      if (from.getAttribute(attr.name) !== attr.value) from.setAttribute(attr.name, attr.value);
+    });
+  }
+  var i = 0;
+  while (i < to.childNodes.length) {
+    var a = from.childNodes[i], b = to.childNodes[i];
+    if (!a) from.appendChild(b.cloneNode(true));
+    else if (a.nodeType !== b.nodeType || a.nodeName !== b.nodeName ||
+             (a.nodeType === 1 && a.getAttribute('data-morph-key') !== b.getAttribute('data-morph-key'))) {
+      from.replaceChild(b.cloneNode(true), a);
+    } else if (a.nodeType === 3) {
+      if (a.data !== b.data) a.data = b.data;
+    } else morph(a, b);
+    i++;
+  }
+  while (from.childNodes.length > to.childNodes.length) from.removeChild(from.lastChild);
+}
+
 function render() {
-  var active = document.activeElement;
-  var focusKey = active && active.getAttribute ? active.getAttribute('data-key') : null;
-  appEl.innerHTML = (app.screen === 'start' ? startHtml() : gameHtml()) + modalHtml();
-  var target = focusKey ? appEl.querySelector('[data-key="' + focusKey + '"]') : null;
-  if (!target || target.disabled) target = app.modal ? appEl.querySelector('[data-autofocus]') : null;
-  if (target) target.focus();
+  var tpl = document.createElement('template');
+  tpl.innerHTML = '<div class="screen" data-morph-key="' + app.screen + '">' +
+    (app.screen === 'start' ? startHtml() : gameHtml()) + '</div>' + modalHtml();
+  morph(appEl, tpl.content);
+  if (app.modal) {
+    var auto = appEl.querySelector('[data-autofocus]');
+    if (auto && !auto.closest('.overlay').contains(document.activeElement)) auto.focus();
+  }
+}
+
+// Закрытие окна с плавным исчезновением
+function closeModal() {
+  var overlay = appEl.querySelector('.overlay');
+  if (!overlay || prefersReducedMotion()) { app.modal = null; render(); return; }
+  overlay.classList.add('closing');
+  setTimeout(function () { app.modal = null; render(); }, 180);
 }
 
 appEl.addEventListener('input', function (e) {
@@ -761,7 +816,7 @@ appEl.addEventListener('click', function (e) {
   if (!btn || btn.disabled) return;
   var act = btn.getAttribute('data-act');
   if (act === 'rules' || act === 'confirm') app.modal = act;
-  else if (act === 'close') app.modal = null;
+  else if (act === 'close') { closeModal(); return; }
   else if (act === 'restart') startGame();
   else if (btn.hasAttribute('data-mode')) app.mode = btn.getAttribute('data-mode');
   else if (btn.id === 'play' || btn.id === 'again') startGame();
@@ -774,7 +829,7 @@ appEl.addEventListener('click', function (e) {
 });
 
 document.addEventListener('keydown', function (e) {
-  if (e.key === 'Escape' && app.modal) { app.modal = null; render(); }
+  if (e.key === 'Escape' && app.modal) closeModal();
 });
 
 render();

@@ -155,14 +155,92 @@ test('игра заканчивается, когда заполнены все 
   assert.equal(Y.roll(g), false);
 });
 
-test('компьютер оставляет самые частые значения (при равенстве — большее)', () => {
-  assert.deepEqual(plain(Y.cpuChooseHold([2, 2, 5, 5, 1])), [false, false, true, true, false]);
-  assert.deepEqual(plain(Y.cpuChooseHold([3, 3, 3, 1, 6])), [true, true, true, false, false]);
-  assert.deepEqual(plain(Y.cpuChooseHold([1, 2, 3, 4, 6])), [false, false, false, false, true]);
+test('компьютер оставляет тройку одинаковых и добрасывает остальное', () => {
+  const p = Y.createPlayer('c');
+  assert.deepEqual(plain(Y.cpuChooseHold(p, [6, 6, 6, 1, 2], 2)), [true, true, true, false, false]);
+  assert.deepEqual(plain(Y.cpuChooseHold(p, [6, 6, 6, 6, 2], 1)), [true, true, true, true, false]);
 });
 
-test('компьютер выбирает категорию с максимумом очков', () => {
+test('компьютер останавливается, когда добрасывать невыгодно', () => {
+  const p = Y.createPlayer('c');
+  assert.deepEqual(plain(Y.cpuChooseHold(p, [2, 3, 4, 5, 6], 2)), [true, true, true, true, true]);
+  assert.deepEqual(plain(Y.cpuChooseHold(p, [5, 5, 5, 5, 5], 2)), [true, true, true, true, true]);
+  assert.deepEqual(plain(Y.cpuChooseHold(p, [1, 2, 3, 4, 6], 0)), [true, true, true, true, true], 'бросков нет');
+});
+
+test('компьютер с последним броском держит четыре подряд ради большого стрита', () => {
+  const p = Y.createPlayer('c');
+  const hold = plain(Y.cpuChooseHold(p, [1, 2, 3, 4, 4], 1));
+  assert.deepEqual(hold.slice(0, 4), [true, true, true, true]);
+  assert.equal(hold[4], false);
+});
+
+test('компьютер не тратит ятзи и шанс на слабый бросок, если есть дешёвая клетка', () => {
+  const p = Y.createPlayer('c');
+  assert.equal(Y.cpuChooseCategory(p, [1, 1, 3, 4, 6]), 'ones');
+});
+
+test('компьютер выбирает выгодную клетку', () => {
   assert.equal(Y.cpuChooseCategory(Y.createPlayer('c'), [2, 2, 5, 5, 5]), 'fullHouse');
   assert.equal(Y.cpuChooseCategory(Y.createPlayer('c'), [1, 2, 3, 4, 5]), 'largeStraight');
-  assert.equal(Y.cpuChooseCategory(playerWith({ yahtzee: 50, sixes: 18 }), [6, 6, 6, 6, 6]), 'largeStraight');
+  assert.equal(Y.cpuChooseCategory(Y.createPlayer('c'), [3, 3, 3, 3, 3]), 'yahtzee');
+});
+
+test('компьютер учитывает жокер: при ятзи берёт разрешённую клетку', () => {
+  const p = playerWith({ yahtzee: 50, sixes: 18 });
+  const cat = Y.cpuChooseCategory(p, [6, 6, 6, 6, 6]);
+  assert.ok(Y.allowedCategories(p, [6, 6, 6, 6, 6]).indexOf(cat) >= 0);
+  assert.equal(cat, 'fourKind');
+});
+
+test('компьютер не записывает 0 в клетку, если есть вариант с очками', () => {
+  const p = Y.createPlayer('c');
+  [[2, 2, 3, 4, 6], [1, 3, 3, 5, 6], [4, 4, 5, 6, 6]].forEach((dice) => {
+    const cat = Y.cpuChooseCategory(p, dice);
+    assert.ok(Y.possibleScore(p, cat, dice) > 0, dice.join(',') + ' -> ' + cat);
+  });
+});
+
+// Детерминированный генератор для воспроизводимых партий
+function seeded(seed) {
+  return () => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function soloScore(seed, smart) {
+  const rng = seeded(seed);
+  const g = Y.createGame(['x']);
+  while (!g.gameOver) {
+    const player = g.players[0];
+    Y.roll(g, rng);
+    for (let k = 0; k < 2; k++) {
+      const hold = plain(Y.cpuChooseHold(player, plain(g.dice), Y.rollsLeft(g), smart ? 'hard' : 'easy'));
+      if (hold.every(Boolean)) break;
+      g.held = hold;
+      Y.roll(g, rng);
+    }
+    const cat = Y.cpuChooseCategory(player, g.dice, smart ? 'hard' : 'easy');
+    assert.equal(Y.scoreCategory(g, cat), true);
+  }
+  return Y.totalScore(g.players[0]);
+}
+
+test('сильный компьютер заметно сильнее лёгкого на одинаковых бросках', () => {
+  const seeds = [1, 2, 3, 4, 5, 6, 7, 8];
+  const avg = (smart) => seeds.reduce((a, s) => a + soloScore(s, smart), 0) / seeds.length;
+  const smart = avg(true), greedy = avg(false);
+  assert.ok(smart > greedy + 30, 'сильный ' + smart.toFixed(1) + ' против лёгкого ' + greedy.toFixed(1));
+});
+
+test('лёгкий компьютер: оставляет самое частое значение и берёт максимум очков', () => {
+  const p = Y.createPlayer('c');
+  assert.deepEqual(plain(Y.cpuChooseHold(p, [2, 2, 5, 5, 1], 2, 'easy')), [false, false, true, true, false]);
+  assert.deepEqual(plain(Y.cpuChooseHold(p, [3, 3, 3, 1, 6], 2, 'easy')), [true, true, true, false, false]);
+  assert.equal(Y.cpuChooseCategory(p, [1, 2, 3, 4, 5], 'easy'), 'largeStraight');
+  // жокер: максимум очков среди разрешённых клеток — большой стрит (40)
+  assert.equal(Y.cpuChooseCategory(playerWith({ yahtzee: 50, sixes: 18 }), [6, 6, 6, 6, 6], 'easy'), 'largeStraight');
 });

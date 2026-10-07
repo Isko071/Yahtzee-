@@ -106,7 +106,7 @@ button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .grid { display: grid; grid-template-columns: 1fr 84px 84px; gap: 4px; align-items: center; }
 .sheet-head { padding: 10px 10px 8px; border-bottom: 1px solid var(--line); }
 .head-name {
-  text-align: center; font-size: 14px; font-weight: 700; padding: 6px 2px; border-radius: 10px;
+  text-align: center; font-size: 13px; font-weight: 700; padding: 6px 2px; border-radius: 10px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .head-name.current { background: var(--accent); color: var(--accent-ink); }
@@ -156,6 +156,40 @@ button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .btn-primary {
   min-height: 52px; border-radius: 14px; border: none;
   background: var(--accent); color: var(--accent-ink); font-size: 16px; font-weight: 700; cursor: pointer;
+}
+/* Стартовый экран */
+.start { max-width: 440px; margin: 0 auto; padding-top: 6vh; display: flex; flex-direction: column; gap: 28px; width: 100%; }
+.brand { display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
+.logo { display: flex; gap: 8px; }
+.logo .die-mini {
+  width: 44px; height: 44px; border-radius: 11px; background: var(--die); box-shadow: var(--shadow);
+  display: grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr); padding: 7px;
+}
+.logo .die-mini span { display: flex; align-items: center; justify-content: center; }
+.logo .die-mini i { width: 7px; height: 7px; border-radius: 50%; }
+.logo .die-mini i.on { background: var(--pip); }
+.brand h1 { margin: 0; font-size: 48px; letter-spacing: -0.02em; line-height: 1; }
+.brand p { margin: 0; color: var(--muted); font-size: 17px; line-height: 1.4; }
+.field { display: flex; flex-direction: column; gap: 10px; }
+.field-title { font-size: 14px; font-weight: 600; color: var(--muted); }
+.mode-btn, .name-input, .name-fixed {
+  padding: 14px 16px; border-radius: 14px; border: 2px solid var(--line); background: var(--surface);
+  color: var(--ink); font-size: 17px; min-height: 56px; font-family: inherit;
+}
+.mode-btn { text-align: left; cursor: pointer; }
+.mode-btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.modes { display: flex; flex-direction: column; gap: 8px; }
+.name-input:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.name-fixed { border-style: dashed; color: var(--muted); display: flex; align-items: center; }
+.btn-play {
+  min-height: 56px; border-radius: 14px; border: none; background: var(--accent); color: var(--accent-ink);
+  font-size: 18px; font-weight: 700; cursor: pointer; box-shadow: var(--shadow);
+}
+.dialog-actions { display: flex; gap: 10px; }
+.dialog-actions button { flex: 1; }
+.btn-secondary {
+  min-height: 52px; border-radius: 14px; border: 2px solid var(--line); background: var(--surface);
+  color: var(--ink); font-size: 16px; cursor: pointer;
 }
 </style>
 </head>
@@ -343,6 +377,26 @@ function endTurn(state) {
   }
 }
 
+// ===== Компьютерный соперник =====
+// Оставляет кубики с самым частым значением (при равенстве — большее)
+function cpuChooseHold(dice) {
+  var counts = countFaces(dice);
+  var best = 1;
+  for (var v = 1; v <= 6; v++) if (counts[v] >= counts[best]) best = v;
+  return dice.map(function (d) { return d === best; });
+}
+
+// Выбирает доступную категорию с максимумом очков (при равенстве — первую в таблице)
+function cpuChooseCategory(player, dice) {
+  var allowed = allowedCategories(player, dice);
+  var best = allowed[0], bestPts = -1;
+  allowed.forEach(function (c) {
+    var pts = possibleScore(player, c, dice);
+    if (pts > bestPts) { bestPts = pts; best = c; }
+  });
+  return best;
+}
+
 var Yahtzee = {
   UPPER: UPPER, LOWER: LOWER, CATEGORIES: CATEGORIES, MAX_ROLLS: MAX_ROLLS,
   isRolled: isRolled, countFaces: countFaces, isYahtzee: isYahtzee,
@@ -351,7 +405,8 @@ var Yahtzee = {
   allowedCategories: allowedCategories, possibleScore: possibleScore,
   upperSum: upperSum, upperBonus: upperBonus, lowerSum: lowerSum, totalScore: totalScore,
   isPlayerDone: isPlayerDone, createGame: createGame, rollsLeft: rollsLeft,
-  roll: roll, toggleHold: toggleHold, scoreCategory: scoreCategory
+  roll: roll, toggleHold: toggleHold, scoreCategory: scoreCategory,
+  cpuChooseHold: cpuChooseHold, cpuChooseCategory: cpuChooseCategory
 };
 // </logic>
 
@@ -365,8 +420,59 @@ var LABELS = {
 var SUBS = { threeKind: '3+', fourKind: '4+', fullHouse: '25', smallStraight: '30', largeStraight: '40', yahtzee: '50' };
 var PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
 
-var game = createGame(['Игрок 1', 'Игрок 2']);
+var game = null;
+var app = { screen: 'start', mode: 'cpu', n1: 'Игрок 1', n2: 'Игрок 2', thinking: false };
+var cpuToken = 0; // увеличивается при выходе из партии, чтобы остановить ход компьютера
 var appEl = document.getElementById('app');
+
+function isHumanTurn() {
+  return !(app.mode === 'cpu' && game.current === 1);
+}
+
+function sleep(ms) {
+  return new Promise(function (resolve) { setTimeout(resolve, ms); });
+}
+
+function startGame() {
+  var first = app.n1.trim() || 'Игрок 1';
+  var second = app.mode === 'cpu' ? 'Компьютер' : (app.n2.trim() || 'Игрок 2');
+  cpuToken++;
+  app.thinking = false;
+  game = createGame([first, second]);
+  app.screen = 'game';
+}
+
+function toMenu() {
+  cpuToken++;
+  app.thinking = false;
+  app.screen = 'start';
+}
+
+// Ход компьютера: бросок, два раза «оставить частые и бросить ещё», запись в лучшую категорию
+async function cpuTurn() {
+  var token = cpuToken;
+  var alive = function () { return token === cpuToken; };
+  app.thinking = true;
+  render();
+  await sleep(800); if (!alive()) return;
+  roll(game); render();
+  for (var k = 0; k < 2; k++) {
+    await sleep(700); if (!alive()) return;
+    game.held = cpuChooseHold(game.dice); render();
+    await sleep(1000); if (!alive()) return;
+    roll(game); render();
+  }
+  await sleep(900); if (!alive()) return;
+  var cat = cpuChooseCategory(game.players[game.current], game.dice);
+  app.thinking = false;
+  scoreCategory(game, cat);
+  render();
+  continueIfCpu();
+}
+
+function continueIfCpu() {
+  if (app.mode === 'cpu' && !app.thinking && !game.gameOver && game.current === 1) cpuTurn();
+}
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, function (c) {
@@ -376,12 +482,14 @@ function esc(s) {
 
 function statusText() {
   if (game.gameOver) return '';
+  if (app.thinking) return 'Компьютер думает…';
   if (game.rollsUsed === 0) return 'Бросьте кубики';
   if (game.rollsUsed >= MAX_ROLLS) return 'Выберите клетку для записи';
   return 'Зафиксируйте кубики или бросьте ещё';
 }
 
 function rollLabel() {
+  if (app.thinking) return 'Ход компьютера';
   if (game.rollsUsed === 0) return 'Бросить';
   if (game.rollsUsed < MAX_ROLLS) return 'Бросить ещё (' + rollsLeft(game) + ')';
   return 'Бросков не осталось';
@@ -389,7 +497,7 @@ function rollLabel() {
 
 function diceHtml() {
   var fresh = game.rollsUsed === 0;
-  var canToggle = !game.gameOver && game.rollsUsed > 0 && game.rollsUsed < MAX_ROLLS;
+  var canToggle = isHumanTurn() && !game.gameOver && game.rollsUsed > 0 && game.rollsUsed < MAX_ROLLS;
   return game.dice.map(function (v, i) {
     var held = game.held[i];
     var label = fresh ? 'Кубик ' + (i + 1) + ', не брошен' : 'Кубик ' + (i + 1) + ': ' + v + (held ? ', зафиксирован' : '');
@@ -426,7 +534,7 @@ function catCellHtml(pi, cat, hints) {
 }
 
 function getHints() {
-  if (game.gameOver || game.rollsUsed === 0) return null;
+  if (game.gameOver || game.rollsUsed === 0 || !isHumanTurn()) return null;
   var player = game.players[game.current];
   var allowed = allowedCategories(player, game.dice);
   var best = null, bestPts = 0;
@@ -492,16 +600,47 @@ function gameOverHtml() {
   return '<div class="overlay" role="dialog" aria-label="Конец игры"><div class="dialog">' +
     '<div><small>Игра окончена</small><h2>' + title + '</h2></div>' +
     '<div class="results">' + rows + '</div>' +
-    '<button class="btn-primary" id="again" data-key="again">Играть снова</button></div></div>';
+    '<div class="dialog-actions"><button class="btn-secondary" id="menu" data-key="menu">В меню</button>' +
+    '<button class="btn-primary" id="again" data-key="again">Играть снова</button></div></div></div>';
+}
+
+function startHtml() {
+  var logo = [5, 3, 6].map(function (v, i) {
+    var pips = '';
+    for (var k = 0; k < 9; k++) pips += '<span><i class="' + (PIPS[v].indexOf(k) >= 0 ? 'on' : '') + '"></i></span>';
+    return '<div class="die-mini" style="transform:rotate(' + [-8, 4, -3][i] + 'deg)">' + pips + '</div>';
+  }).join('');
+  var cpu = app.mode === 'cpu';
+  return '<div class="start">' +
+    '<div class="brand"><div class="logo">' + logo + '</div><h1>Ятзи</h1><p>Пять кубиков, три броска, тринадцать клеток.</p></div>' +
+    '<div class="field"><div class="field-title">Режим</div><div class="modes">' +
+      '<button class="mode-btn" data-key="mode-cpu" data-mode="cpu" aria-pressed="' + cpu + '">Против компьютера</button>' +
+      '<button class="mode-btn" data-key="mode-hot" data-mode="hot" aria-pressed="' + !cpu + '">Вдвоём на одном устройстве</button>' +
+    '</div></div>' +
+    '<div class="field"><div class="field-title">Игроки</div>' +
+      '<input class="name-input" data-name="n1" value="' + esc(app.n1) + '" maxlength="14" aria-label="Имя первого игрока">' +
+      (cpu ? '<div class="name-fixed">Компьютер</div>'
+           : '<input class="name-input" data-name="n2" value="' + esc(app.n2) + '" maxlength="14" aria-label="Имя второго игрока">') +
+    '</div>' +
+    '<button class="btn-play" id="play" data-key="play">Играть</button></div>';
 }
 
 function render() {
+  if (app.screen === 'start') {
+    var activeKey = document.activeElement && document.activeElement.getAttribute ? document.activeElement.getAttribute('data-key') : null;
+    appEl.innerHTML = startHtml();
+    if (activeKey) {
+      var target = appEl.querySelector('[data-key="' + activeKey + '"]');
+      if (target) target.focus();
+    }
+    return;
+  }
   var active = document.activeElement;
   var focusKey = active && active.getAttribute ? active.getAttribute('data-key') : null;
   var hints = getHints();
   var dots = '';
   for (var i = 0; i < MAX_ROLLS; i++) dots += '<i class="' + (i < rollsLeft(game) ? 'on' : '') + '"></i>';
-  var canRoll = !game.gameOver && game.rollsUsed < MAX_ROLLS;
+  var canRoll = isHumanTurn() && !app.thinking && !game.gameOver && game.rollsUsed < MAX_ROLLS;
 
   appEl.innerHTML =
     '<div class="topbar"><div class="turn"><small>Ход</small><strong>' +
@@ -524,14 +663,22 @@ function render() {
   }
 }
 
+appEl.addEventListener('input', function (e) {
+  var name = e.target.getAttribute('data-name');
+  if (name) app[name] = e.target.value;
+});
+
 appEl.addEventListener('click', function (e) {
   var btn = e.target.closest('button');
   if (!btn || btn.disabled) return;
-  if (btn.id === 'roll') roll(game);
+  if (btn.hasAttribute('data-mode')) app.mode = btn.getAttribute('data-mode');
+  else if (btn.id === 'play' || btn.id === 'again') { startGame(); }
+  else if (btn.id === 'menu') toMenu();
+  else if (btn.id === 'roll') roll(game);
   else if (btn.hasAttribute('data-die')) toggleHold(game, Number(btn.getAttribute('data-die')));
   else if (btn.hasAttribute('data-cat')) scoreCategory(game, btn.getAttribute('data-cat'));
-  else if (btn.id === 'again') game = createGame(['Игрок 1', 'Игрок 2']);
   render();
+  if (app.screen === 'game') continueIfCpu();
 });
 
 render();

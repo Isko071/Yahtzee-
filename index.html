@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ятзи</title>
+</head>
+<body>
+<h1>Ятзи</h1>
+<p>Этап 1: игровая логика (интерфейс появится на этапе 2). Объект <code>Yahtzee</code> доступен в консоли.</p>
+
+<script>
+// <logic>
+// ===== Константы =====
+var UPPER = ['ones', 'twos', 'threes', 'fours', 'fives', 'sixes'];
+var LOWER = ['threeKind', 'fourKind', 'fullHouse', 'smallStraight', 'largeStraight', 'yahtzee', 'chance'];
+var CATEGORIES = UPPER.concat(LOWER);
+var NUM_DICE = 5;
+var MAX_ROLLS = 3;
+var UPPER_BONUS_THRESHOLD = 63;
+var UPPER_BONUS = 35;
+var YAHTZEE_BONUS = 100;
+var FIXED_SCORES = { fullHouse: 25, smallStraight: 30, largeStraight: 40, yahtzee: 50 };
+
+// ===== Чистые функции подсчёта =====
+function isRolled(dice) {
+  return dice.length === NUM_DICE && dice.every(function (d) { return d >= 1 && d <= 6; });
+}
+
+// counts[1..6] — сколько раз выпала каждая грань
+function countFaces(dice) {
+  var counts = [0, 0, 0, 0, 0, 0, 0];
+  dice.forEach(function (d) { counts[d]++; });
+  return counts;
+}
+
+function sum(dice) {
+  return dice.reduce(function (a, b) { return a + b; }, 0);
+}
+
+function hasRun(dice, length) {
+  var counts = countFaces(dice);
+  for (var start = 1; start + length - 1 <= 6; start++) {
+    var ok = true;
+    for (var f = start; f < start + length; f++) if (counts[f] === 0) ok = false;
+    if (ok) return true;
+  }
+  return false;
+}
+
+function isYahtzee(dice) {
+  return isRolled(dice) && dice.every(function (d) { return d === dice[0]; });
+}
+
+// Очки категории по обычным правилам (без жокера)
+function scoreRaw(cat, dice) {
+  if (!isRolled(dice)) return 0;
+  var counts = countFaces(dice);
+  var max = Math.max.apply(null, counts);
+  var upperIdx = UPPER.indexOf(cat);
+  if (upperIdx >= 0) return counts[upperIdx + 1] * (upperIdx + 1);
+  switch (cat) {
+    case 'threeKind': return max >= 3 ? sum(dice) : 0;
+    case 'fourKind': return max >= 4 ? sum(dice) : 0;
+    case 'fullHouse': return counts.indexOf(3) >= 0 && counts.indexOf(2) >= 0 ? FIXED_SCORES.fullHouse : 0;
+    case 'smallStraight': return hasRun(dice, 4) ? FIXED_SCORES.smallStraight : 0;
+    case 'largeStraight': return hasRun(dice, 5) ? FIXED_SCORES.largeStraight : 0;
+    case 'yahtzee': return max === 5 ? FIXED_SCORES.yahtzee : 0;
+    case 'chance': return sum(dice);
+  }
+  return 0;
+}
+
+// ===== Игрок и таблица очков =====
+function createPlayer(name) {
+  var scores = {};
+  CATEGORIES.forEach(function (c) { scores[c] = null; });
+  return { name: name, scores: scores, yahtzeeBonuses: 0 };
+}
+
+function openCategories(player) {
+  return CATEGORIES.filter(function (c) { return player.scores[c] === null; });
+}
+
+// Жокер: выпал ятзи, а клетка «Ятзи» уже заполнена (50 или 0)
+function isJoker(player, dice) {
+  return isYahtzee(dice) && player.scores.yahtzee !== null;
+}
+
+// Бонус +100: выпал ятзи, а в клетке «Ятзи» стоит 50
+function earnsYahtzeeBonus(player, dice) {
+  return isYahtzee(dice) && player.scores.yahtzee === FIXED_SCORES.yahtzee;
+}
+
+// Категории, в которые можно записать текущий бросок (с учётом жокера)
+function allowedCategories(player, dice) {
+  if (!isRolled(dice)) return [];
+  var open = openCategories(player);
+  if (!isJoker(player, dice)) return open;
+  var upperCat = UPPER[dice[0] - 1];
+  if (open.indexOf(upperCat) >= 0) return [upperCat];
+  var lowerOpen = open.filter(function (c) { return LOWER.indexOf(c) >= 0; });
+  return lowerOpen.length ? lowerOpen : open;
+}
+
+// Очки, которые получит игрок за категорию (по жокеру фулл-хаус и стриты дают полные очки)
+function possibleScore(player, cat, dice) {
+  if (isJoker(player, dice) && (cat === 'fullHouse' || cat === 'smallStraight' || cat === 'largeStraight')) {
+    return FIXED_SCORES[cat];
+  }
+  return scoreRaw(cat, dice);
+}
+
+function upperSum(player) {
+  return UPPER.reduce(function (a, c) { return a + (player.scores[c] || 0); }, 0);
+}
+
+function upperBonus(player) {
+  return upperSum(player) >= UPPER_BONUS_THRESHOLD ? UPPER_BONUS : 0;
+}
+
+function lowerSum(player) {
+  return LOWER.reduce(function (a, c) { return a + (player.scores[c] || 0); }, 0);
+}
+
+function totalScore(player) {
+  return upperSum(player) + upperBonus(player) + lowerSum(player) + player.yahtzeeBonuses * YAHTZEE_BONUS;
+}
+
+function isPlayerDone(player) {
+  return openCategories(player).length === 0;
+}
+
+// ===== Состояние игры =====
+function createGame(names) {
+  return {
+    players: names.map(createPlayer),
+    current: 0,
+    dice: [1, 1, 1, 1, 1],
+    held: [false, false, false, false, false],
+    rollsUsed: 0,
+    gameOver: false
+  };
+}
+
+function rollsLeft(state) {
+  return MAX_ROLLS - state.rollsUsed;
+}
+
+// Бросает незафиксированные кубики (при первом броске — все)
+function roll(state, rng) {
+  rng = rng || Math.random;
+  if (state.gameOver || state.rollsUsed >= MAX_ROLLS) return false;
+  if (state.rollsUsed === 0) state.held = [false, false, false, false, false];
+  for (var i = 0; i < NUM_DICE; i++) {
+    if (!state.held[i]) state.dice[i] = 1 + Math.floor(rng() * 6);
+  }
+  state.rollsUsed++;
+  return true;
+}
+
+// Фиксация/разблокировка кубика: возможна между бросками
+function toggleHold(state, index) {
+  if (state.gameOver || state.rollsUsed < 1 || state.rollsUsed >= MAX_ROLLS) return false;
+  if (index < 0 || index >= NUM_DICE) return false;
+  state.held[index] = !state.held[index];
+  return true;
+}
+
+// Запись результата в категорию; передаёт ход следующему игроку
+function scoreCategory(state, cat) {
+  if (state.gameOver) return false;
+  var player = state.players[state.current];
+  if (allowedCategories(player, state.dice).indexOf(cat) < 0) return false;
+  var points = possibleScore(player, cat, state.dice);
+  if (earnsYahtzeeBonus(player, state.dice)) player.yahtzeeBonuses++;
+  player.scores[cat] = points;
+  endTurn(state);
+  return true;
+}
+
+function endTurn(state) {
+  state.dice = [1, 1, 1, 1, 1];
+  state.held = [false, false, false, false, false];
+  state.rollsUsed = 0;
+  if (state.players.every(isPlayerDone)) {
+    state.gameOver = true;
+  } else {
+    state.current = (state.current + 1) % state.players.length;
+  }
+}
+
+var Yahtzee = {
+  UPPER: UPPER, LOWER: LOWER, CATEGORIES: CATEGORIES, MAX_ROLLS: MAX_ROLLS,
+  isRolled: isRolled, countFaces: countFaces, isYahtzee: isYahtzee,
+  scoreRaw: scoreRaw, createPlayer: createPlayer, openCategories: openCategories,
+  isJoker: isJoker, earnsYahtzeeBonus: earnsYahtzeeBonus,
+  allowedCategories: allowedCategories, possibleScore: possibleScore,
+  upperSum: upperSum, upperBonus: upperBonus, lowerSum: lowerSum, totalScore: totalScore,
+  isPlayerDone: isPlayerDone, createGame: createGame, rollsLeft: rollsLeft,
+  roll: roll, toggleHold: toggleHold, scoreCategory: scoreCategory
+};
+// </logic>
+</script>
+</body>
+</html>

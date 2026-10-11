@@ -225,7 +225,8 @@ button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .mode-btn { text-align: left; cursor: pointer; }
 .mode-btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
 .modes { display: flex; flex-direction: column; gap: 8px; }
-.levels { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.levels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.levels .mode-btn { min-width: 0; padding-left: 4px; padding-right: 4px; font-size: 14px; text-align: center; }
 .name-input:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .name-fixed { border-style: dashed; color: var(--muted); display: flex; align-items: center; }
 /* Низкие широкие экраны (телефон лёжа): две колонки */
@@ -302,6 +303,7 @@ button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 <body>
 <main class="app" id="app"></main>
 
+<script src="optimal.js"></script>
 <script>
 // <logic>
 // ===== Константы =====
@@ -522,6 +524,62 @@ function cpuCategoryValue(player, cat, dice) {
   return value;
 }
 
+// ===== Уровень «Эксперт» (идеальная игра) =====
+// Таблица optimal.js хранит для каждого состояния партии (заполненные клетки, сумма верхней секции
+// до 63, стоит ли в «Ятзи» 50) средний счёт, который игрок добавит до конца партии при идеальной игре.
+// Ценность записи = очки + бонусы + значение таблицы для следующего состояния.
+var optimalTable;
+function perfectTable() {
+  if (optimalTable === undefined) {
+    optimalTable = null;
+    try {
+      if (typeof YAHTZEE_OPTIMAL === 'string' && typeof atob === 'function') {
+        var bin = atob(YAHTZEE_OPTIMAL), table = new Uint16Array(bin.length >> 1);
+        for (var i = 0; i < table.length; i++) table[i] = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8);
+        if (table.length === (1 << 13) * 128) optimalTable = table;
+      }
+    } catch (e) { optimalTable = null; }
+  }
+  return optimalTable;
+}
+
+function perfectReady() { return perfectTable() !== null; }
+
+// Средний счёт до конца партии из состояния игрока (идеальная игра)
+function perfectValue(player) {
+  var mask = 0;
+  CATEGORIES.forEach(function (c, i) { if (player.scores[c] !== null) mask |= 1 << i; });
+  if (mask === (1 << CATEGORIES.length) - 1) return 0;
+  var u = Math.min(UPPER_BONUS_THRESHOLD, upperSum(player));
+  var yf = player.scores.yahtzee === FIXED_SCORES.yahtzee ? 1 : 0;
+  return perfectTable()[(mask * 64 + u) * 2 + yf] / 100;
+}
+
+function perfectCategoryValue(player, cat, dice) {
+  var pts = possibleScore(player, cat, dice);
+  var next = { scores: {}, yahtzeeBonuses: 0 };
+  CATEGORIES.forEach(function (c) { next.scores[c] = player.scores[c]; });
+  next.scores[cat] = pts;
+  var value = pts + perfectValue(next);
+  if (earnsYahtzeeBonus(player, dice)) value += YAHTZEE_BONUS;
+  if (UPPER.indexOf(cat) >= 0 && upperSum(player) < UPPER_BONUS_THRESHOLD && upperSum(next) >= UPPER_BONUS_THRESHOLD) {
+    value += UPPER_BONUS;
+  }
+  return value;
+}
+
+// Функция оценки клетки для уровня (без таблицы «Эксперт» играет так же, как «Нормально», но без ошибок)
+function cpuValueFunction(level) {
+  return level === 'expert' && perfectReady() ? perfectCategoryValue : cpuCategoryValue;
+}
+
+// «Нормально» играет умно, но с вероятностью NORMAL_LAPSE принимает простое решение, как на лёгком
+// уровне: так счёт около 200 очков за партию. rng — генератор [0, 1), по умолчанию Math.random
+var NORMAL_LAPSE = 0.5;
+function cpuLapses(level, rng) {
+  return level === 'normal' && (rng || Math.random)() < NORMAL_LAPSE;
+}
+
 // Лёгкий уровень: оставляет самое частое значение (при равенстве — большее)
 function cpuEasyHold(dice) {
   var counts = countFaces(dice);
@@ -541,13 +599,14 @@ function cpuEasyCategory(player, dice) {
   return best;
 }
 
-// Лучшая клетка для записи: максимум ценности среди разрешённых (level: 'easy' или 'hard')
-function cpuChooseCategory(player, dice, level) {
-  if (level === 'easy') return cpuEasyCategory(player, dice);
+// Лучшая клетка для записи: максимум ценности среди разрешённых (level: 'easy', 'normal' или 'expert')
+function cpuChooseCategory(player, dice, level, rng) {
+  if (level === 'easy' || cpuLapses(level, rng)) return cpuEasyCategory(player, dice);
   var allowed = allowedCategories(player, dice);
+  var valueOf = cpuValueFunction(level);
   var best = allowed[0], bestValue = -Infinity;
   allowed.forEach(function (c) {
-    var v = cpuCategoryValue(player, c, dice);
+    var v = valueOf(player, c, dice);
     if (v > bestValue) { bestValue = v; best = c; }
   });
   return best;
@@ -609,10 +668,11 @@ function holdOptionsFor(sorted) {
 
 // Выбор кубиков для сохранения: массив из пяти boolean.
 // Если все true — лучше остановиться и записать результат (добрасывать невыгодно).
-function cpuChooseHold(player, dice, rollsLeft, level) {
+function cpuChooseHold(player, dice, rollsLeft, level, rng) {
   var allHeld = [true, true, true, true, true];
   if (rollsLeft <= 0) return allHeld;
-  if (level === 'easy') return cpuEasyHold(dice);
+  if (level === 'easy' || cpuLapses(level, rng)) return cpuEasyHold(dice);
+  var valueOf = cpuValueFunction(level);
   var stopMemo = {};
   var evMemo = [];
   for (var r = 0; r <= rollsLeft; r++) evMemo.push({});
@@ -621,7 +681,7 @@ function cpuChooseHold(player, dice, rollsLeft, level) {
     if (stopMemo[key] === undefined) {
       var best = -Infinity;
       allowedCategories(player, sorted).forEach(function (c) {
-        var v = cpuCategoryValue(player, c, sorted);
+        var v = valueOf(player, c, sorted);
         if (v > best) best = v;
       });
       stopMemo[key] = best;
@@ -673,7 +733,8 @@ var Yahtzee = {
   isPlayerDone: isPlayerDone, createGame: createGame, rollsLeft: rollsLeft,
   roll: roll, toggleHold: toggleHold, scoreCategory: scoreCategory,
   cpuChooseHold: cpuChooseHold, cpuChooseCategory: cpuChooseCategory,
-  cpuEasyHold: cpuEasyHold, cpuEasyCategory: cpuEasyCategory
+  cpuEasyHold: cpuEasyHold, cpuEasyCategory: cpuEasyCategory,
+  perfectReady: perfectReady, perfectValue: perfectValue
 };
 // </logic>
 
@@ -688,7 +749,7 @@ var SUBS = { threeKind: '3+', fourKind: '4+', fullHouse: '25', smallStraight: '3
 var PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
 
 var game = null;
-var app = { screen: 'start', mode: 'cpu', level: 'hard', n1: 'Игрок 1', n2: 'Игрок 2', thinking: false, rolling: false, display: null, modal: null };
+var app = { screen: 'start', mode: 'cpu', level: 'normal', n1: 'Игрок 1', n2: 'Игрок 2', thinking: false, rolling: false, display: null, modal: null };
 var gameToken = 0; // увеличивается при выходе из партии, чтобы остановить ход компьютера и анимацию
 var appEl = document.getElementById('app');
 
@@ -1008,7 +1069,8 @@ function startHtml() {
     '</div></div>' +
     (cpu ? '<div class="field"><div class="field-title">Сложность</div><div class="levels">' +
       '<button class="mode-btn" data-key="level-easy" data-level="easy" aria-pressed="' + (app.level === 'easy') + '">Лёгкий</button>' +
-      '<button class="mode-btn" data-key="level-hard" data-level="hard" aria-pressed="' + (app.level === 'hard') + '">Сильный</button>' +
+      '<button class="mode-btn" data-key="level-normal" data-level="normal" aria-pressed="' + (app.level === 'normal') + '">Нормально</button>' +
+      (perfectReady() ? '<button class="mode-btn" data-key="level-expert" data-level="expert" aria-pressed="' + (app.level === 'expert') + '">Эксперт</button>' : '') +
     '</div></div>' : '') +
     '<div class="field players"><div class="field-title">Игроки</div>' +
       '<input class="name-input" data-name="n1" value="' + esc(app.n1) + '" maxlength="14" aria-label="Имя первого игрока">' +

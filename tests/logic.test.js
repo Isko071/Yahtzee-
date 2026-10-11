@@ -211,31 +211,6 @@ function seeded(seed) {
   };
 }
 
-function soloScore(seed, smart) {
-  const rng = seeded(seed);
-  const g = Y.createGame(['x']);
-  while (!g.gameOver) {
-    const player = g.players[0];
-    Y.roll(g, rng);
-    for (let k = 0; k < 2; k++) {
-      const hold = plain(Y.cpuChooseHold(player, plain(g.dice), Y.rollsLeft(g), smart ? 'hard' : 'easy'));
-      if (hold.every(Boolean)) break;
-      g.held = hold;
-      Y.roll(g, rng);
-    }
-    const cat = Y.cpuChooseCategory(player, g.dice, smart ? 'hard' : 'easy');
-    assert.equal(Y.scoreCategory(g, cat), true);
-  }
-  return Y.totalScore(g.players[0]);
-}
-
-test('сложный компьютер заметно сильнее лёгкого на одинаковых бросках', () => {
-  const seeds = [1, 2, 3, 4, 5, 6, 7, 8];
-  const avg = (smart) => seeds.reduce((a, s) => a + soloScore(s, smart), 0) / seeds.length;
-  const smart = avg(true), greedy = avg(false);
-  assert.ok(smart > greedy + 30, 'сильный ' + smart.toFixed(1) + ' против лёгкого ' + greedy.toFixed(1));
-});
-
 test('лёгкий компьютер: оставляет самое частое значение и берёт максимум очков', () => {
   const p = Y.createPlayer('c');
   assert.deepEqual(plain(Y.cpuChooseHold(p, [2, 2, 5, 5, 1], 2, 'easy')), [false, false, true, true, false]);
@@ -249,24 +224,25 @@ test('лёгкий компьютер: оставляет самое часто�
 const optimalSrc = fs.readFileSync(path.join(__dirname, '..', 'optimal.js'), 'utf8');
 const YP = vm.runInNewContext(optimalSrc + code + ';Yahtzee', { atob: (s) => Buffer.from(s, 'base64').toString('latin1') });
 
+// Партия в одиночку: rng для кубиков и отдельный rng для «ошибок» уровня «Нормально»
 function soloScoreWith(Lib, seed, level) {
-  const rng = seeded(seed);
+  const rng = seeded(seed), lapse = seeded(seed + 99999);
   const g = Lib.createGame(['x']);
   while (!g.gameOver) {
     const player = g.players[0];
     Lib.roll(g, rng);
     for (let k = 0; k < 2; k++) {
-      const hold = plain(Lib.cpuChooseHold(player, plain(g.dice), Lib.rollsLeft(g), level));
+      const hold = plain(Lib.cpuChooseHold(player, plain(g.dice), Lib.rollsLeft(g), level, lapse));
       if (hold.every(Boolean)) break;
       g.held = hold;
       Lib.roll(g, rng);
     }
-    assert.equal(Lib.scoreCategory(g, Lib.cpuChooseCategory(player, g.dice, level)), true);
+    assert.equal(Lib.scoreCategory(g, Lib.cpuChooseCategory(player, g.dice, level, lapse)), true);
   }
   return Lib.totalScore(g.players[0]);
 }
 
-test('идеальный уровень: таблица загружена, средний счёт идеальной партии около 254,6', () => {
+test('уровень «Эксперт»: таблица загружена, средний счёт идеальной партии около 254,6', () => {
   assert.equal(YP.perfectReady(), true);
   assert.equal(Y.perfectReady(), false, 'без optimal.js таблицы нет');
   const v = YP.perfectValue(YP.createPlayer('a'));
@@ -274,25 +250,28 @@ test('идеальный уровень: таблица загружена, ср
   assert.equal(YP.perfectValue(playerWith(Object.fromEntries(YP.CATEGORIES.map((c) => [c, 0])))), 0, 'партия окончена');
 });
 
-test('идеальный уровень без таблицы играет как сложный', () => {
+test('эксперт без таблицы играет в полную силу «нормально»', () => {
   const p = Y.createPlayer('c');
-  assert.deepEqual(plain(Y.cpuChooseHold(p, [6, 6, 6, 1, 2], 2, 'perfect')), plain(Y.cpuChooseHold(p, [6, 6, 6, 1, 2], 2, 'hard')));
-  assert.equal(Y.cpuChooseCategory(p, [1, 2, 3, 4, 5], 'perfect'), 'largeStraight');
+  assert.deepEqual(plain(Y.cpuChooseHold(p, [6, 6, 6, 1, 2], 2, 'expert')), plain(Y.cpuChooseHold(p, [6, 6, 6, 1, 2], 2)));
+  assert.equal(Y.cpuChooseCategory(p, [1, 2, 3, 4, 5], 'expert'), 'largeStraight');
 });
 
-test('идеальный уровень: выбирает осмысленные ходы', () => {
+test('уровень «Эксперт»: выбирает осмысленные ходы', () => {
   const p = YP.createPlayer('c');
-  assert.deepEqual(plain(YP.cpuChooseHold(p, [6, 6, 6, 1, 2], 2, 'perfect')), [true, true, true, false, false]);
-  assert.deepEqual(plain(YP.cpuChooseHold(p, [2, 3, 4, 5, 6], 2, 'perfect')), [true, true, true, true, true]);
-  assert.equal(YP.cpuChooseCategory(p, [3, 3, 3, 3, 3], 'perfect'), 'yahtzee');
+  assert.deepEqual(plain(YP.cpuChooseHold(p, [6, 6, 6, 1, 2], 2, 'expert')), [true, true, true, false, false]);
+  assert.deepEqual(plain(YP.cpuChooseHold(p, [2, 3, 4, 5, 6], 2, 'expert')), [true, true, true, true, true]);
+  assert.equal(YP.cpuChooseCategory(p, [3, 3, 3, 3, 3], 'expert'), 'yahtzee');
   // жокер: ятзи шестёрок при занятом «Ятзи» и свободных шестёрках — только шестёрки
-  assert.equal(YP.cpuChooseCategory(playerWith({ yahtzee: 50 }), [6, 6, 6, 6, 6], 'perfect'), 'sixes');
+  assert.equal(YP.cpuChooseCategory(playerWith({ yahtzee: 50 }), [6, 6, 6, 6, 6], 'expert'), 'sixes');
 });
 
-test('идеальный уровень играет заметно лучше сложного и набирает около 254', () => {
-  const seeds = Array.from({ length: 30 }, (_, i) => i + 1);
+test('уровни по силе: лёгкий до 200, нормально около 200, эксперт около 254', () => {
+  const seeds = Array.from({ length: 40 }, (_, i) => i + 1);
   const avg = (level) => seeds.reduce((a, s) => a + soloScoreWith(YP, s, level), 0) / seeds.length;
-  const perfect = avg('perfect'), hard = avg('hard');
-  assert.ok(perfect > 240 && perfect < 270, 'идеальный ' + perfect.toFixed(1));
-  assert.ok(perfect > hard + 3, 'идеальный ' + perfect.toFixed(1) + ' против сложного ' + hard.toFixed(1));
+  const easy = avg('easy'), normal = avg('normal'), expert = avg('expert');
+  const msg = 'лёгкий ' + easy.toFixed(1) + ', нормально ' + normal.toFixed(1) + ', эксперт ' + expert.toFixed(1);
+  assert.ok(easy < 200, msg);
+  assert.ok(normal > 185 && normal < 220, msg);
+  assert.ok(expert > 240 && expert < 270, msg);
+  assert.ok(normal > easy + 10 && expert > normal + 25, msg);
 });

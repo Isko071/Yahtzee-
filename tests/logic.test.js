@@ -229,7 +229,7 @@ function soloScore(seed, smart) {
   return Y.totalScore(g.players[0]);
 }
 
-test('сильный компьютер заметно сильнее лёгкого на одинаковых бросках', () => {
+test('сложный компьютер заметно сильнее лёгкого на одинаковых бросках', () => {
   const seeds = [1, 2, 3, 4, 5, 6, 7, 8];
   const avg = (smart) => seeds.reduce((a, s) => a + soloScore(s, smart), 0) / seeds.length;
   const smart = avg(true), greedy = avg(false);
@@ -243,4 +243,56 @@ test('лёгкий компьютер: оставляет самое часто�
   assert.equal(Y.cpuChooseCategory(p, [1, 2, 3, 4, 5], 'easy'), 'largeStraight');
   // жокер: максимум очков среди разрешённых клеток — большой стрит (40)
   assert.equal(Y.cpuChooseCategory(playerWith({ yahtzee: 50, sixes: 18 }), [6, 6, 6, 6, 6], 'easy'), 'largeStraight');
+});
+
+// ===== Идеальный уровень (таблица optimal.js) =====
+const optimalSrc = fs.readFileSync(path.join(__dirname, '..', 'optimal.js'), 'utf8');
+const YP = vm.runInNewContext(optimalSrc + code + ';Yahtzee', { atob: (s) => Buffer.from(s, 'base64').toString('latin1') });
+
+function soloScoreWith(Lib, seed, level) {
+  const rng = seeded(seed);
+  const g = Lib.createGame(['x']);
+  while (!g.gameOver) {
+    const player = g.players[0];
+    Lib.roll(g, rng);
+    for (let k = 0; k < 2; k++) {
+      const hold = plain(Lib.cpuChooseHold(player, plain(g.dice), Lib.rollsLeft(g), level));
+      if (hold.every(Boolean)) break;
+      g.held = hold;
+      Lib.roll(g, rng);
+    }
+    assert.equal(Lib.scoreCategory(g, Lib.cpuChooseCategory(player, g.dice, level)), true);
+  }
+  return Lib.totalScore(g.players[0]);
+}
+
+test('идеальный уровень: таблица загружена, средний счёт идеальной партии около 254,6', () => {
+  assert.equal(YP.perfectReady(), true);
+  assert.equal(Y.perfectReady(), false, 'без optimal.js таблицы нет');
+  const v = YP.perfectValue(YP.createPlayer('a'));
+  assert.ok(Math.abs(v - 254.59) < 0.05, String(v));
+  assert.equal(YP.perfectValue(playerWith(Object.fromEntries(YP.CATEGORIES.map((c) => [c, 0])))), 0, 'партия окончена');
+});
+
+test('идеальный уровень без таблицы играет как сложный', () => {
+  const p = Y.createPlayer('c');
+  assert.deepEqual(plain(Y.cpuChooseHold(p, [6, 6, 6, 1, 2], 2, 'perfect')), plain(Y.cpuChooseHold(p, [6, 6, 6, 1, 2], 2, 'hard')));
+  assert.equal(Y.cpuChooseCategory(p, [1, 2, 3, 4, 5], 'perfect'), 'largeStraight');
+});
+
+test('идеальный уровень: выбирает осмысленные ходы', () => {
+  const p = YP.createPlayer('c');
+  assert.deepEqual(plain(YP.cpuChooseHold(p, [6, 6, 6, 1, 2], 2, 'perfect')), [true, true, true, false, false]);
+  assert.deepEqual(plain(YP.cpuChooseHold(p, [2, 3, 4, 5, 6], 2, 'perfect')), [true, true, true, true, true]);
+  assert.equal(YP.cpuChooseCategory(p, [3, 3, 3, 3, 3], 'perfect'), 'yahtzee');
+  // жокер: ятзи шестёрок при занятом «Ятзи» и свободных шестёрках — только шестёрки
+  assert.equal(YP.cpuChooseCategory(playerWith({ yahtzee: 50 }), [6, 6, 6, 6, 6], 'perfect'), 'sixes');
+});
+
+test('идеальный уровень играет заметно лучше сложного и набирает около 254', () => {
+  const seeds = Array.from({ length: 30 }, (_, i) => i + 1);
+  const avg = (level) => seeds.reduce((a, s) => a + soloScoreWith(YP, s, level), 0) / seeds.length;
+  const perfect = avg('perfect'), hard = avg('hard');
+  assert.ok(perfect > 240 && perfect < 270, 'идеальный ' + perfect.toFixed(1));
+  assert.ok(perfect > hard + 3, 'идеальный ' + perfect.toFixed(1) + ' против сложного ' + hard.toFixed(1));
 });
